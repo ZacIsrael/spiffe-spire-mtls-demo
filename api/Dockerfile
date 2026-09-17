@@ -1,11 +1,32 @@
-# Provides the SPIRE Agent binary that can communicate with the Workload API.
+# Provides the SPIRE Agent binary used for direct Workload API diagnostics.
 FROM ghcr.io/spiffe/spire-agent:1.11.2 AS spire
 
-# Provides a lightweight Linux environment for the temporary API workload.
-FROM alpine:3.22
+# Provides the Node.js runtime used to build and execute the API service.
+FROM node:22-alpine
 
-# Copies the SPIRE Agent CLI from the official SPIRE image into this workload.
+# Sets the application directory used by subsequent Docker instructions.
+WORKDIR /app
+
+# Copies dependency manifests before source code to improve Docker layer caching.
+COPY package*.json ./
+
+# Installs the exact dependencies recorded in package-lock.json.
+RUN npm ci
+
+# Copies the TypeScript configuration into the application image.
+COPY tsconfig.json ./
+
+# Copies the API source code into the application image.
+COPY src ./src
+
+# Compiles the TypeScript application into JavaScript.
+RUN npm run build
+
+# Copies the SPIRE CLI into the image for Workload API diagnostics.
 COPY --from=spire /opt/spire/bin/spire-agent /opt/spire/bin/spire-agent
 
-# Keeps the temporary API workload alive while SPIFFE identity is tested.
-CMD ["sleep", "infinity"]
+# Documents the TCP port on which the API application listens.
+EXPOSE 3000
+
+# Starts the compiled API application when the container launches.
+CMD ["npm", "start"]
