@@ -76,8 +76,14 @@ services:
     labels:
       spiffe.workload:
         "client"
+        # Overrides the SPIRE image startup so this temporary workload remains running.
+    entrypoint: ["sleep"]
 
-        # Provides access to the SPIFFE Workload API socket.
+    # Keeps the temporary Client workload alive for identity testing.
+    command:
+      ["infinity"]
+
+      # Provides access to the SPIFFE Workload API socket.
     volumes:
       # Mounts the shared Agent socket directory inside the Client container.
       - spire-agent-socket:/run/spire/sockets
@@ -93,10 +99,16 @@ services:
 
     # Adds metadata that the Docker WorkloadAttestor can use as a selector.
     labels:
-      spiffe.workload:
-        "api"
+      spiffe.workload: "api"
 
-        # Provides access to the SPIFFE Workload API socket.
+    # Overrides the SPIRE image startup so this temporary workload remains running.
+    entrypoint: ["sleep"]
+
+    # Keeps the temporary API workload alive for identity testing.
+    command:
+      ["infinity"]
+
+      # Provides access to the SPIFFE Workload API socket.
     volumes:
       # Mounts the shared Agent socket directory inside the API container.
       - spire-agent-socket:/run/spire/sockets
