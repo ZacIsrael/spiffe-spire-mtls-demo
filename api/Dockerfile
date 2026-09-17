@@ -1,5 +1,5 @@
-# Uses a lightweight Linux image for the temporary API workload container.
-FROM alpine:3.22
+# Uses the SPIRE Agent image so the workload can directly test the Workload API.
+FROM ghcr.io/spiffe/spire-agent:1.11.2
 
 # Keeps the container running so SPIRE can perform workload attestation against it.
 CMD ["sleep", "infinity"]
