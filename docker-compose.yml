@@ -67,6 +67,36 @@ services:
 
       # Points to the agent.conf file mounted from our repository.
       - "/opt/spire/conf/agent/agent.conf"
+
+    # Runs a temporary Client workload used to test SPIFFE workload identity.
+  client:
+
+    # Builds the Client workload image from its local Dockerfile.
+    build:
+      context: ./client
+
+    # Gives the container a predictable name for inspection and debugging.
+    container_name: spiffe-client
+
+    # Adds metadata that the Docker WorkloadAttestor can use as a selector.
+    labels:
+      spiffe.workload: "client"
+
+
+  # Runs a temporary API workload used to test SPIFFE workload identity.
+  api:
+
+    # Builds the API workload image from its local Dockerfile.
+    build:
+      context: ./api
+
+    # Gives the container a predictable name for inspection and debugging.
+    container_name: spiffe-api
+
+    # Adds metadata that the Docker WorkloadAttestor can use as a selector.
+    labels:
+      spiffe.workload: "api"
+
 # Defines Docker-managed persistent volumes used by services in this project.
 volumes:
 
