@@ -1,31 +1,66 @@
-// Defines the Docker DNS address of the API service.
-const API_URL = "http://api:3000/hello";
+// Imports HTTPS so the Client can establish a mutual TLS connection.
+import https from "node:https";
 
-// Sends an HTTP request from the Client workload to the API workload.
-async function callApi(): Promise<void> {
-  // Records which API endpoint the Client is attempting to reach.
-  console.log(`Calling ${API_URL}`);
+// Imports the filesystem API to load SPIFFE-issued credential material.
+import fs from "node:fs";
 
-  // Sends a standard unauthenticated HTTP request to the API service.
-  const response = await fetch(API_URL);
+// Loads the Client workload's SPIFFE-issued X.509-SVID certificate.
+const certificate = fs.readFileSync("/tmp/spiffe/svid.0.pem");
 
-  // Throws an error if the API returns an unsuccessful HTTP status code.
-  if (!response.ok) {
-    throw new Error(`API request failed with status ${response.status}`);
-  }
+// Loads the private key associated with the Client workload's X.509-SVID.
+const privateKey = fs.readFileSync("/tmp/spiffe/svid.0.key");
 
-  // Parses the JSON response returned by the API.
-  const data = await response.json();
+// Loads the SPIFFE trust bundle used to validate the API certificate.
+const trustBundle = fs.readFileSync("/tmp/spiffe/bundle.0.pem");
 
-  // Displays the response so successful service communication can be verified.
-  console.log("API response:", data);
-}
+// Defines the request configuration for the authenticated API connection.
+const requestOptions: https.RequestOptions = {
+  // Uses Docker Compose DNS to locate the API workload.
+  hostname: "api",
 
-// Executes the Client request and handles unexpected application errors.
-callApi().catch((error: unknown) => {
-  // Prints the failure before terminating with a nonzero exit status.
+  // Connects to the API's HTTPS listener.
+  port: 3000,
+
+  // Requests the protected API endpoint.
+  path: "/hello",
+
+  // Uses an HTTP GET request inside the TLS connection.
+  method: "GET",
+
+  // Presents the Client workload's SPIFFE-issued certificate.
+  cert: certificate,
+
+  // Proves possession of the private key associated with the Client SVID.
+  key: privateKey,
+
+  // Uses the SPIFFE trust bundle to validate the API certificate chain.
+  ca: trustBundle,
+
+  // Avoids DNS hostname validation because SPIFFE identities are URI SANs.
+  checkServerIdentity: () => undefined,
+};
+
+// Creates the HTTPS request using the Client's SPIFFE credential material.
+const request = https.request(requestOptions, (response) => {
+  // Stores response data received from the API.
+  let body = "";
+
+  // Adds each response chunk to the accumulated response body.
+  response.on("data", (chunk: Buffer) => {
+    body += chunk.toString();
+  });
+
+  // Displays the API response after transmission completes.
+  response.on("end", () => {
+    console.log("API response:", body);
+  });
+});
+
+// Reports TLS or network failures encountered by the Client.
+request.on("error", (error: Error) => {
   console.error("Client request failed:", error);
-
-  // Signals to Docker that the Client application terminated unsuccessfully.
   process.exit(1);
 });
+
+// Sends the HTTPS request.
+request.end();
