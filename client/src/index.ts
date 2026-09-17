@@ -5,13 +5,13 @@ import https from "node:https";
 import fs from "node:fs";
 
 // Loads the Client workload's SPIFFE-issued X.509-SVID certificate.
-const certificate = fs.readFileSync("/tmp/spiffe/svid.0.pem");
+const certificate = fs.readFileSync("/tmp/svid.0.pem");
 
 // Loads the private key associated with the Client workload's X.509-SVID.
-const privateKey = fs.readFileSync("/tmp/spiffe/svid.0.key");
+const privateKey = fs.readFileSync("/tmp/svid.0.key");
 
 // Loads the SPIFFE trust bundle used to validate the API certificate.
-const trustBundle = fs.readFileSync("/tmp/spiffe/bundle.0.pem");
+const trustBundle = fs.readFileSync("/tmp/bundle.0.pem");
 
 // Defines the request configuration for the authenticated API connection.
 const requestOptions: https.RequestOptions = {

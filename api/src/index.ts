@@ -14,13 +14,13 @@ const app = express();
 const PORT = 3000;
 
 // Loads the API workload's SPIFFE-issued X.509-SVID certificate.
-const certificate = fs.readFileSync("/tmp/spiffe/svid.0.pem");
+const certificate = fs.readFileSync("/tmp/svid.0.pem");
 
 // Loads the private key associated with the API workload's X.509-SVID.
-const privateKey = fs.readFileSync("/tmp/spiffe/svid.0.key");
+const privateKey = fs.readFileSync("/tmp/svid.0.key");
 
 // Loads the SPIFFE trust bundle used to validate Client certificates.
-const trustBundle = fs.readFileSync("/tmp/spiffe/bundle.0.pem");
+const trustBundle = fs.readFileSync("/tmp/bundle.0.pem");
 
 // Creates the TLS configuration used by the API server.
 const tlsOptions: https.ServerOptions = {
