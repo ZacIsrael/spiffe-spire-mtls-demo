@@ -36,7 +36,7 @@ services:
 
     # Shares the host PID namespace so workload attestors can resolve caller processes.
     pid: "host"
-    
+
     # Gives the Agent container a predictable name for Docker commands.
     container_name: spire-agent
 
@@ -66,54 +66,42 @@ services:
       # Points to the agent.conf file mounted from our repository.
       - "/opt/spire/conf/agent/agent.conf"
 
-    # Runs a temporary Client workload used to test SPIFFE workload identity.
+  # Runs the Client workload that sends requests to the API.
   client:
-    # Builds the Client workload image from its local Dockerfile.
+    # Builds the Client application from its local Dockerfile.
     build:
       context: ./client
 
-    # Gives the container a predictable name for inspection and debugging.
+    # Gives the Client container a predictable name for diagnostics.
     container_name: spiffe-client
 
-    # Adds metadata that the Docker WorkloadAttestor can use as a selector.
+    # Starts the API before starting the Client workload.
+    depends_on:
+      - api
+
+    # Adds workload metadata used by the Docker WorkloadAttestor.
     labels:
-      spiffe.workload:
-        "client"
-        # Overrides the SPIRE image startup so this temporary workload remains running.
-    entrypoint: ["sleep"]
+      spiffe.workload: "client"
 
-    # Keeps the temporary Client workload alive for identity testing.
-    command:
-      ["infinity"]
-
-      # Provides access to the SPIFFE Workload API socket.
+    # Shares the SPIFFE Workload API socket with the Client workload.
     volumes:
-      # Mounts the shared Agent socket directory inside the Client container.
       - spire-agent-socket:/run/spire/sockets
 
-  # Runs a temporary API workload used to test SPIFFE workload identity.
+  # Runs the API workload that will receive requests from the Client.
   api:
-    # Builds the API workload image from its local Dockerfile.
+    # Builds the API application from its local Dockerfile.
     build:
       context: ./api
 
-    # Gives the container a predictable name for inspection and debugging.
+    # Gives the API container a predictable name for diagnostics.
     container_name: spiffe-api
 
-    # Adds metadata that the Docker WorkloadAttestor can use as a selector.
+    # Adds workload metadata used by the Docker WorkloadAttestor.
     labels:
       spiffe.workload: "api"
 
-    # Overrides the SPIRE image startup so this temporary workload remains running.
-    entrypoint: ["sleep"]
-
-    # Keeps the temporary API workload alive for identity testing.
-    command:
-      ["infinity"]
-
-      # Provides access to the SPIFFE Workload API socket.
+    # Shares the SPIFFE Workload API socket with the API workload.
     volumes:
-      # Mounts the shared Agent socket directory inside the API container.
       - spire-agent-socket:/run/spire/sockets
 
 # Defines Docker-managed persistent volumes used by services in this project.
