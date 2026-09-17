@@ -34,6 +34,36 @@ services:
       # Points SPIRE to the server.conf file mounted into the container above.
       - "/opt/spire/conf/server/server.conf"
 
+  # Runs the SPIRE Agent alongside workloads in the local environment.
+  spire-agent:
+
+    # Uses the official SPIRE Agent image published by the SPIFFE project.
+    image: ghcr.io/spiffe/spire-agent:1.11.2
+
+    # Gives the Agent container a predictable name for Docker commands.
+    container_name: spire-agent
+
+    # Sets a predictable hostname for the node represented by this Agent.
+    hostname: spire-agent
+
+    # Ensures Docker starts the SPIRE Server before starting the Agent container.
+    depends_on:
+      - spire-server
+
+    # Mounts our version-controlled Agent configuration into the container.
+    volumes:
+
+      # Makes agent.conf available at the path expected by the startup command.
+      - ./spire/agent:/opt/spire/conf/agent
+
+    # Starts SPIRE Agent using our mounted configuration file.
+    command:
+
+      # Explicitly specifies the Agent configuration file.
+      - "-config"
+
+      # Points to the agent.conf file mounted from our repository.
+      - "/opt/spire/conf/agent/agent.conf"
 # Defines Docker-managed persistent volumes used by services in this project.
 volumes:
 
