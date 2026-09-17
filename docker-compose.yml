@@ -34,6 +34,9 @@ services:
     # Uses the official SPIRE Agent image published by the SPIFFE project.
     image: ghcr.io/spiffe/spire-agent:1.11.2
 
+    # Shares the host PID namespace so workload attestors can resolve caller processes.
+    pid: "host"
+    
     # Gives the Agent container a predictable name for Docker commands.
     container_name: spire-agent
 
