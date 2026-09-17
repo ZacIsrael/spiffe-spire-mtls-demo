@@ -28,6 +28,7 @@ spiffe://demo.local/api
 
 ## Architecture
 
+```text
 SPIRE Server
     |
     v
@@ -36,3 +37,4 @@ SPIRE Agent
   v      v
 Client -> API
        mTLS
+```
