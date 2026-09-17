@@ -1,9 +1,7 @@
 # Defines the containers and persistent storage used by this SPIFFE/SPIRE demo.
 services:
-
   # Runs the central SPIRE Server responsible for managing the trust domain.
   spire-server:
-
     # Uses the official SPIRE Server container image published by the SPIFFE project.
     image: ghcr.io/spiffe/spire-server:1.11.2
 
@@ -15,19 +13,16 @@ services:
 
     # Mounts the SPIRE configuration into the container.
     volumes:
-
       # Makes the local server.conf available inside the SPIRE Server container.
       - ./spire/server:/opt/spire/conf/server
 
     # Publishes the SPIRE Server's Agent-facing port to the host.
     ports:
-
       # Maps host port 8081 to the SPIRE Server's port 8081.
       - "8081:8081"
 
     # Supplies command-line arguments to the SPIRE Server container's entrypoint.
     command:
-
       # Tells SPIRE that we are explicitly providing the configuration file location.
       - "-config"
 
@@ -36,7 +31,6 @@ services:
 
   # Runs the SPIRE Agent alongside workloads in the local environment.
   spire-agent:
-
     # Uses the official SPIRE Agent image published by the SPIFFE project.
     image: ghcr.io/spiffe/spire-agent:1.11.2
 
@@ -52,16 +46,17 @@ services:
 
     # Mounts our version-controlled Agent configuration into the container.
     volumes:
-
       # Makes agent.conf available at the path expected by the startup command.
       - ./spire/agent:/opt/spire/conf/agent
 
       # Allows the Docker WorkloadAttestor to inspect container metadata.
       - /var/run/docker.sock:/var/run/docker.sock
 
+        # Shares the Workload API socket with containers requesting SPIFFE identities.
+      - spire-agent-socket:/run/spire/sockets
+
     # Starts SPIRE Agent using our mounted configuration file.
     command:
-
       # Explicitly specifies the Agent configuration file.
       - "-config"
 
@@ -70,7 +65,6 @@ services:
 
     # Runs a temporary Client workload used to test SPIFFE workload identity.
   client:
-
     # Builds the Client workload image from its local Dockerfile.
     build:
       context: ./client
@@ -80,12 +74,16 @@ services:
 
     # Adds metadata that the Docker WorkloadAttestor can use as a selector.
     labels:
-      spiffe.workload: "client"
+      spiffe.workload:
+        "client"
 
+        # Provides access to the SPIFFE Workload API socket.
+    volumes:
+      # Mounts the shared Agent socket directory inside the Client container.
+      - spire-agent-socket:/run/spire/sockets
 
   # Runs a temporary API workload used to test SPIFFE workload identity.
   api:
-
     # Builds the API workload image from its local Dockerfile.
     build:
       context: ./api
@@ -95,10 +93,18 @@ services:
 
     # Adds metadata that the Docker WorkloadAttestor can use as a selector.
     labels:
-      spiffe.workload: "api"
+      spiffe.workload:
+        "api"
+
+        # Provides access to the SPIFFE Workload API socket.
+    volumes:
+      # Mounts the shared Agent socket directory inside the API container.
+      - spire-agent-socket:/run/spire/sockets
 
 # Defines Docker-managed persistent volumes used by services in this project.
 volumes:
-
   # Preserves the SPIRE Server database and keys across container recreation.
   spire-server-data:
+
+  # Carries the SPIFFE Workload API Unix socket between the Agent and workloads.
+  spire-agent-socket:
