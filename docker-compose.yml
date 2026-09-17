@@ -1,0 +1,41 @@
+# Defines the containers and persistent storage used by this SPIFFE/SPIRE demo.
+services:
+
+  # Runs the central SPIRE Server responsible for managing the trust domain.
+  spire-server:
+
+    # Uses the official SPIRE Server container image published by the SPIFFE project.
+    image: ghcr.io/spiffe/spire-server:1.11.2
+
+    # Gives the container a predictable name for easier Docker commands and debugging.
+    container_name: spire-server
+
+    # Sets the container hostname that other containers can use on the Docker network.
+    hostname: spire-server
+
+    # Mounts the SPIRE configuration into the container.
+    volumes:
+
+      # Makes the local server.conf available inside the SPIRE Server container.
+      - ./spire/server:/opt/spire/conf/server
+
+    # Publishes the SPIRE Server's Agent-facing port to the host.
+    ports:
+
+      # Maps host port 8081 to the SPIRE Server's port 8081.
+      - "8081:8081"
+
+    # Supplies command-line arguments to the SPIRE Server container's entrypoint.
+    command:
+
+      # Tells SPIRE that we are explicitly providing the configuration file location.
+      - "-config"
+
+      # Points SPIRE to the server.conf file mounted into the container above.
+      - "/opt/spire/conf/server/server.conf"
+
+# Defines Docker-managed persistent volumes used by services in this project.
+volumes:
+
+  # Preserves the SPIRE Server database and keys across container recreation.
+  spire-server-data:
