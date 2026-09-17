@@ -56,6 +56,9 @@ services:
       # Makes agent.conf available at the path expected by the startup command.
       - ./spire/agent:/opt/spire/conf/agent
 
+      # Allows the Docker WorkloadAttestor to inspect container metadata.
+      - /var/run/docker.sock:/var/run/docker.sock
+
     # Starts SPIRE Agent using our mounted configuration file.
     command:
 
