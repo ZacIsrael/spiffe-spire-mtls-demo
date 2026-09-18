@@ -47,7 +47,7 @@ services:
     depends_on:
       - spire-server
 
-    # Mounts our version-controlled Agent configuration into the container.
+    # Mounts the version-controlled Agent configuration into the container.
     volumes:
       # Makes agent.conf available at the path expected by the startup command.
       - ./spire/agent:/opt/spire/conf/agent
@@ -58,12 +58,12 @@ services:
         # Shares the Workload API socket with containers requesting SPIFFE identities.
       - spire-agent-socket:/run/spire/sockets
 
-    # Starts SPIRE Agent using our mounted configuration file.
+    # Starts SPIRE Agent using the mounted configuration file.
     command:
       # Explicitly specifies the Agent configuration file.
       - "-config"
 
-      # Points to the agent.conf file mounted from our repository.
+      # Points to the agent.conf file mounted from the repository.
       - "/opt/spire/conf/agent/agent.conf"
 
   # Runs the Client workload that sends requests to the API.
