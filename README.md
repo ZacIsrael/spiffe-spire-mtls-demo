@@ -24,10 +24,11 @@ demo.local
 
 ## Workload Identities
 
-| Workload | SPIFFE ID |
-| --- | --- |
-| Client | `spiffe://demo.local/client` |
-| API | `spiffe://demo.local/api` |
+| Workload | SPIFFE ID | Purpose |
+|---|---|---|
+| Client | `spiffe://demo.local/client` | Authorized API caller |
+| API | `spiffe://demo.local/api` | Protected service |
+| Rogue Client | `spiffe://demo.local/rogue-client` | Valid SPIFFE identity intentionally denied by API authorization |
 
 ---
 
@@ -558,13 +559,26 @@ mTLS
 
 ---
 
-## Implementation Note
+## Authentication and Authorization
 
-For simplicity, this demo exports the X.509-SVID, private key, and trust bundle to files before each application starts.
+The API applies two separate security checks.
 
-A production SPIFFE implementation would typically consume the **SPIFFE Workload API continuously**, commonly through a SPIFFE-aware SDK or integration, so applications can receive rotated SVIDs without requiring a restart.
+First, mutual TLS authenticates the connecting workload. The Client must
+present an X.509-SVID that chains to the `demo.local` SPIFFE trust bundle.
 
-The demo also focuses on SPIRE-issued identities and TLS trust validation. The Node.js implementation does not add application-level authorization rules that explicitly restrict operations to a specific peer SPIFFE ID.
+Second, the API extracts the peer SPIFFE ID from the certificate URI SAN
+and authorizes only:
+
+`spiffe://demo.local/client`
+
+The `rogue-client` demonstrates the difference between authentication and
+authorization. SPIRE successfully attests the workload and issues:
+
+`spiffe://demo.local/rogue-client`
+
+Its X.509-SVID is valid and trusted, so mutual TLS authentication succeeds.
+However, the API rejects the request with HTTP 403 because that SPIFFE ID
+is not authorized for the protected endpoint.
 
 ---
 
