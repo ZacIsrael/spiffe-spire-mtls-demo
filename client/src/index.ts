@@ -52,6 +52,10 @@ const request = https.request(requestOptions, (response) => {
 
   // Displays the API response after transmission completes.
   response.on("end", () => {
+    // Displays the HTTP result so authorization success or failure is obvious.
+    console.log(`API status: ${response.statusCode}`);
+
+    // Displays the body returned by the API.
     console.log("API response:", body);
   });
 });
