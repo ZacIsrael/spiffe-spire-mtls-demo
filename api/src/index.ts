@@ -1,13 +1,13 @@
 // Imports HTTPS so the API can require TLS instead of plain HTTP.
 import https from "node:https";
 
-// Imports TLS types used to inspect the authenticated peer certificate.
-import tls from "node:tls";
-
 // Imports the filesystem API to load SPIFFE-issued credential material.
 import fs from "node:fs";
 
-// Imports Express and the request type used by the protected endpoint.
+// Imports the TLS socket type used to inspect the authenticated peer certificate.
+import type { TLSSocket } from "node:tls";
+
+// Imports Express and the Request type used by the protected endpoint.
 import express, { type Request } from "express";
 
 // Creates the Express application.
@@ -28,25 +28,37 @@ const privateKey = fs.readFileSync("/tmp/svid.0.key");
 // Loads the SPIFFE trust bundle used to validate Client certificates.
 const trustBundle = fs.readFileSync("/tmp/bundle.0.pem");
 
-// Extracts the peer's SPIFFE ID from the URI SAN in its X.509-SVID.
+// Extracts the authenticated peer's SPIFFE ID from its X.509-SVID.
+// SPIFFE encodes the workload identity as a URI Subject Alternative Name.
+// A valid X.509-SVID contains exactly one SPIFFE URI SAN.
 function getPeerSpiffeId(request: Request): string | undefined {
-  const tlsSocket = request.socket as tls.TLSSocket;
+  // Treats the HTTPS request socket as the TLS socket that authenticated the peer.
+  const tlsSocket = request.socket as TLSSocket;
 
-  // Retrieves the certificate already authenticated by the TLS layer.
+  // Retrieves the peer certificate presented during the mTLS handshake.
   const peerCertificate = tlsSocket.getPeerCertificate();
 
-  // Reads the certificate Subject Alternative Name field.
+  // Reads the Subject Alternative Name field from the peer certificate.
   const subjectAltName = peerCertificate.subjectaltname;
 
+  // Rejects identity extraction when no SAN information is present.
   if (!subjectAltName) {
     return undefined;
   }
 
-  // SPIFFE identities are carried in URI Subject Alternative Names.
-  return subjectAltName
+  // Extracts only URI SAN values that use the SPIFFE URI scheme.
+  const spiffeIds = subjectAltName
     .split(", ")
-    .find((entry) => entry.startsWith("URI:"))
-    ?.slice("URI:".length);
+    .filter((entry) => entry.startsWith("URI:spiffe://"))
+    .map((entry) => entry.slice("URI:".length));
+
+  // Accepts exactly one SPIFFE URI SAN and rejects ambiguous identities.
+  if (spiffeIds.length !== 1) {
+    return undefined;
+  }
+
+  // Returns the authenticated workload's SPIFFE ID.
+  return spiffeIds[0];
 }
 
 // Creates the TLS configuration used by the API server.
@@ -67,16 +79,19 @@ const tlsOptions: https.ServerOptions = {
   rejectUnauthorized: true,
 };
 
-// Returns a response only when the authenticated SPIFFE ID is authorized.
+// Protects the endpoint with both mTLS authentication and SPIFFE ID authorization.
 app.get("/hello", (request, response) => {
+  // Extracts the SPIFFE ID from the certificate already authenticated by TLS.
   const peerSpiffeId = getPeerSpiffeId(request);
 
-  // Rejects trusted workloads that do not have the required SPIFFE identity.
+  // Rejects trusted workloads that do not have the authorized Client identity.
   if (peerSpiffeId !== AUTHORIZED_CLIENT_SPIFFE_ID) {
+    // Records the identity that attempted to access the protected endpoint.
     console.warn(
-      `Rejected peer SPIFFE ID: ${peerSpiffeId ?? "missing"}`
+      `Rejected peer SPIFFE ID: ${peerSpiffeId ?? "missing or invalid"}`
     );
 
+    // Returns Forbidden because authentication succeeded but authorization failed.
     response.status(403).json({
       error: "Forbidden",
       message: "Peer SPIFFE ID is not authorized for this endpoint.",
@@ -85,9 +100,11 @@ app.get("/hello", (request, response) => {
     return;
   }
 
+  // Records the successfully authenticated and authorized Client identity.
   console.log(`Authorized peer SPIFFE ID: ${peerSpiffeId}`);
 
-  response.json({
+  // Returns the protected response to the authorized Client workload.
+  response.status(200).json({
     message: "Hello from the SPIFFE-authenticated API service!",
     service: "api",
     authorizedPeer: peerSpiffeId,
@@ -96,5 +113,6 @@ app.get("/hello", (request, response) => {
 
 // Creates an HTTPS server protected by mutual TLS.
 https.createServer(tlsOptions, app).listen(PORT, "0.0.0.0", () => {
+  // Reports that the API is ready to accept authenticated TLS connections.
   console.log(`SPIFFE mTLS API listening on port ${PORT}`);
 });
