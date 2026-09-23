@@ -4,10 +4,10 @@ import https from "node:https";
 // Imports the filesystem API to load SPIFFE-issued credential material.
 import fs from "node:fs";
 
-// Loads the Client workload's SPIFFE-issued X.509-SVID certificate.
+// Loads the workload's SPIFFE-issued X.509-SVID certificate.
 const certificate = fs.readFileSync("/tmp/svid.0.pem");
 
-// Loads the private key associated with the Client workload's X.509-SVID.
+// Loads the private key associated with the workload's X.509-SVID.
 const privateKey = fs.readFileSync("/tmp/svid.0.key");
 
 // Loads the SPIFFE trust bundle used to validate the API certificate.
@@ -27,20 +27,20 @@ const requestOptions: https.RequestOptions = {
   // Uses an HTTP GET request inside the TLS connection.
   method: "GET",
 
-  // Presents the Client workload's SPIFFE-issued certificate.
+  // Presents this workload's SPIFFE-issued certificate to the API.
   cert: certificate,
 
-  // Proves possession of the private key associated with the Client SVID.
+  // Proves possession of the private key associated with this workload's SVID.
   key: privateKey,
 
   // Uses the SPIFFE trust bundle to validate the API certificate chain.
   ca: trustBundle,
 
-  // Avoids DNS hostname validation because SPIFFE identities are URI SANs.
+  // Disables DNS hostname matching because the API identity uses a URI SAN.
   checkServerIdentity: () => undefined,
 };
 
-// Creates the HTTPS request using the Client's SPIFFE credential material.
+// Creates the HTTPS request using this workload's SPIFFE credential material.
 const request = https.request(requestOptions, (response) => {
   // Stores response data received from the API.
   let body = "";
@@ -50,19 +50,22 @@ const request = https.request(requestOptions, (response) => {
     body += chunk.toString();
   });
 
-  // Displays the API response after transmission completes.
+  // Displays the HTTP result after transmission completes.
   response.on("end", () => {
-    // Displays the HTTP result so authorization success or failure is obvious.
+    // Makes authorization success or failure obvious during the demo.
     console.log(`API status: ${response.statusCode}`);
 
-    // Displays the body returned by the API.
+    // Displays the response returned by the protected API endpoint.
     console.log("API response:", body);
   });
 });
 
-// Reports TLS or network failures encountered by the Client.
+// Reports TLS or network failures encountered by the workload.
 request.on("error", (error: Error) => {
+  // Prints the connection error so authentication failures remain visible.
   console.error("Client request failed:", error);
+
+  // Returns a non-zero process status for TLS or network failures.
   process.exit(1);
 });
 
