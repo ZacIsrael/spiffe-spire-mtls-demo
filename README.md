@@ -1,10 +1,10 @@
 # SPIFFE/SPIRE mTLS Demo
 
-A small hands-on project demonstrating **workload identity** and **mutual TLS (mTLS)** authentication using [SPIFFE](https://spiffe.io/) and [SPIRE](https://spiffe.io/docs/latest/spire-about/).
+A hands-on project demonstrating **workload identity**, **mutual TLS (mTLS) authentication**, and **SPIFFE ID-based authorization** using [SPIFFE](https://spiffe.io/) and [SPIRE](https://spiffe.io/docs/latest/spire-about/).
 
 ## Goal
 
-Demonstrate secure communication between two workloads:
+Demonstrate secure communication between an authorized Client workload and an API workload:
 
 ```text
 Client Service → API Service
@@ -12,7 +12,21 @@ Client Service → API Service
 
 without manually provisioned API keys, passwords, or TLS certificates.
 
-Instead, the workloads receive cryptographic identities from SPIRE and use those identities to establish an mTLS connection.
+The project also includes a **Rogue Client** that receives a valid SPIFFE identity from the same trust domain but is deliberately denied access by the API.
+
+This demonstrates two separate security decisions:
+
+```text
+Authentication
+      ↓
+Is this a cryptographically trusted workload?
+
+Authorization
+      ↓
+Is this specific workload identity allowed to call the API?
+```
+
+The workloads receive short-lived cryptographic identities from SPIRE and use those identities during mutual TLS.
 
 ---
 
@@ -35,34 +49,60 @@ demo.local
 ## Architecture
 
 ```text
-                    SPIRE Server
-                         │
-                  Node Attestation
-                         │
-                         ▼
-                    SPIRE Agent
-                         │
-                  Workload API
-                   /           \
-                  ▼             ▼
-              Client ── mTLS ──► API
+                        SPIRE Server
+                             │
+                      Node Attestation
+                             │
+                             ▼
+                        SPIRE Agent
+                             │
+                       Workload API
+                    ┌────────┼────────┐
+                    │        │        │
+                    ▼        ▼        ▼
+                 Client  Rogue Client API
+                    │        │        ▲
+                    │        │        │
+                    └──mTLS──┼────────┘
+                             │
+                       mTLS succeeds
+                       authorization
+                           fails
 ```
 
-The **SPIRE Server** manages the trust domain, registration entries, and identity issuance. The **SPIRE Agent** performs workload attestation and exposes the local SPIFFE Workload API.
+The **SPIRE Server** controls the trust domain, stores registration entries, attests the Agent, and manages the signing authority used to issue SPIFFE identities.
 
-The Client and API are identified using Docker workload selectors:
+The **SPIRE Agent** runs next to the workloads, exposes the local SPIFFE Workload API, identifies calling workloads, derives selectors, and returns identities authorized by registration policy.
+
+The workloads do not choose their own SPIFFE IDs.
+
+The Agent observes Docker workload metadata and produces selectors:
 
 ```text
 docker:label:spiffe.workload:client
 docker:label:spiffe.workload:api
+docker:label:spiffe.workload:rogue-client
 ```
 
-Those selectors are mapped through SPIRE registration entries to:
+SPIRE registration entries map those selectors to:
 
 ```text
+docker:label:spiffe.workload:client
+        ↓
 spiffe://demo.local/client
+
+docker:label:spiffe.workload:api
+        ↓
 spiffe://demo.local/api
+
+docker:label:spiffe.workload:rogue-client
+        ↓
+spiffe://demo.local/rogue-client
 ```
+
+The Client and Rogue Client deliberately reuse the **same application code**.
+
+Their identities differ because SPIRE observes different workload properties and matches those properties against different registration entries.
 
 ---
 
@@ -96,11 +136,21 @@ spiffe-spire-mtls-demo/
 └── README.md
 ```
 
+The Rogue Client does not need a separate application directory.
+
+`docker-compose.yml` creates both Client services from:
+
+```text
+./client
+```
+
+but assigns different Docker workload labels to them.
+
 ---
 
 # Demo Walkthrough
 
-This walkthrough demonstrates the complete identity flow:
+The complete identity flow is:
 
 ```text
 Node Attestation
@@ -117,10 +167,26 @@ SPIFFE IDs
       ↓
 X.509-SVIDs
       ↓
-mTLS
+mTLS Authentication
+      ↓
+SPIFFE ID Authorization
 ```
 
-> **Important:** Two terminal windows are required. Steps 1–3 run in **Terminal 1**. The SPIRE Agent remains running there while the remaining demo commands are executed from **Terminal 2**.
+> **Important:** Two terminal windows are required.
+>
+> The SPIRE Agent remains running in **Terminal 1** while the remaining demo commands are executed from **Terminal 2**.
+
+---
+
+## Optional Clean Start
+
+If the project was previously running, remove the old containers and Docker-managed volumes before beginning:
+
+```bash
+docker compose down -v --remove-orphans
+```
+
+This creates a predictable clean starting point for the demonstration.
 
 ---
 
@@ -133,6 +199,18 @@ docker compose up -d spire-server api
 ```
 
 The SPIRE Server establishes the `demo.local` trust domain and exposes the Server API used by the SPIRE Agent.
+
+The API may initially exit because its entrypoint attempts to retrieve SPIFFE credentials before a SPIRE Agent and API registration entry are available.
+
+That behavior is expected.
+
+The entrypoint uses:
+
+```sh
+set -e
+```
+
+so the application does not start when identity retrieval fails.
 
 ---
 
@@ -153,7 +231,7 @@ Copy the generated token before continuing.
 
 ## Step 3 — Bootstrap the SPIRE Agent
 
-Replace `<JOIN_TOKEN>` with the token generated in Step 2:
+In **Terminal 1**, replace `<JOIN_TOKEN>` with the token generated in Step 2:
 
 ```bash
 docker compose run --rm \
@@ -162,9 +240,9 @@ docker compose run --rm \
   -joinToken <JOIN_TOKEN>
 ```
 
-A successful bootstrap proves that the Agent has completed node attestation and has been accepted by the SPIRE Server.
+A successful bootstrap proves that the Agent completed node attestation and was accepted by the SPIRE Server.
 
-The Agent also starts its local Workload API at:
+The Agent exposes its local Workload API at:
 
 ```text
 /run/spire/sockets/api.sock
@@ -172,13 +250,15 @@ The Agent also starts its local Workload API at:
 
 > **Do not stop this command.**
 >
-> Leave the SPIRE Agent running in **Terminal 1**. The Workload API must remain available to the Client and API workloads.
+> Leave the SPIRE Agent running in Terminal 1.
+
+The Workload API must remain available while the API, Client, and Rogue Client retrieve SPIFFE identities.
 
 ---
 
 # Switch to Terminal 2
 
-Use **Terminal 2** for the following commands.
+Use **Terminal 2** for the remaining commands.
 
 Leave Terminal 1 untouched with the SPIRE Agent running.
 
@@ -201,7 +281,19 @@ spiffe://demo.local/spire/agent/join_token/<UUID>
 
 Copy the **complete Agent SPIFFE ID**.
 
-It will be used as the parent identity for both workload registration entries.
+It will be used as the parent identity for all three workload registration entries.
+
+For convenience, it can also be stored in a shell variable:
+
+```bash
+export AGENT_ID='spiffe://demo.local/spire/agent/join_token/<UUID>'
+```
+
+Verify the value:
+
+```bash
+echo "$AGENT_ID"
+```
 
 ---
 
@@ -220,23 +312,25 @@ After starting from a clean environment, the result may be:
 Found 0 entries
 ```
 
-That is expected. The API and Client registrations will be created next.
+That is expected.
+
+The API, Client, and Rogue Client registrations will be created next.
 
 ---
 
 ## Step 6 — Register the API Workload
 
-Replace `<CURRENT_AGENT_SPIFFE_ID>` with the complete Agent SPIFFE ID from Step 4:
+Use the complete Agent SPIFFE ID from Step 4:
 
 ```bash
 docker compose exec spire-server \
   /opt/spire/bin/spire-server entry create \
-  -parentID <CURRENT_AGENT_SPIFFE_ID> \
+  -parentID "$AGENT_ID" \
   -spiffeID spiffe://demo.local/api \
   -selector docker:label:spiffe.workload:api
 ```
 
-This creates the following identity mapping:
+This creates the identity mapping:
 
 ```text
 docker:label:spiffe.workload:api
@@ -245,23 +339,25 @@ docker:label:spiffe.workload:api
      spiffe://demo.local/api
 ```
 
-The API cannot simply claim this SPIFFE ID. Its attested workload selectors must satisfy the registration entry.
+The API cannot simply claim this identity.
+
+Its attested workload properties must satisfy the registration entry.
 
 ---
 
-## Step 7 — Register the Client Workload
+## Step 7 — Register the Authorized Client Workload
 
-Use the **same Agent SPIFFE ID**:
+Use the same Agent SPIFFE ID:
 
 ```bash
 docker compose exec spire-server \
   /opt/spire/bin/spire-server entry create \
-  -parentID <CURRENT_AGENT_SPIFFE_ID> \
+  -parentID "$AGENT_ID" \
   -spiffeID spiffe://demo.local/client \
   -selector docker:label:spiffe.workload:client
 ```
 
-This creates the Client identity mapping:
+This creates the authorized Client mapping:
 
 ```text
 docker:label:spiffe.workload:client
@@ -270,13 +366,68 @@ docker:label:spiffe.workload:client
       spiffe://demo.local/client
 ```
 
-At this point, both workloads have registration policies under the currently attested SPIRE Agent.
+This is the identity that the API explicitly authorizes for `/hello`.
 
 ---
 
-## Step 8 — Restart the API
+## Step 8 — Register the Rogue Client Workload
 
-Restart the API so its entrypoint can contact the Workload API and retrieve fresh SPIFFE credentials:
+Create a registration entry for the third workload:
+
+```bash
+docker compose exec spire-server \
+  /opt/spire/bin/spire-server entry create \
+  -parentID "$AGENT_ID" \
+  -spiffeID spiffe://demo.local/rogue-client \
+  -selector docker:label:spiffe.workload:rogue-client
+```
+
+This creates:
+
+```text
+docker:label:spiffe.workload:rogue-client
+                     │
+                     ▼
+       spiffe://demo.local/rogue-client
+```
+
+The Rogue Client is deliberately given a **real, valid SPIFFE identity**.
+
+The goal is not to make workload attestation fail.
+
+The goal is to prove that a successfully authenticated workload can still fail authorization.
+
+---
+
+## Step 9 — Verify All Registration Entries
+
+Inspect the registration entries:
+
+```bash
+docker compose exec spire-server \
+  /opt/spire/bin/spire-server entry show
+```
+
+The output should represent all three mappings:
+
+```text
+docker:label:spiffe.workload:api
+→ spiffe://demo.local/api
+
+docker:label:spiffe.workload:client
+→ spiffe://demo.local/client
+
+docker:label:spiffe.workload:rogue-client
+→ spiffe://demo.local/rogue-client
+```
+
+All three entries should be parented to the currently attested SPIRE Agent.
+
+---
+
+## Step 10 — Restart the API
+
+Restart the API now that its registration entry exists and the Workload API is available:
 
 ```bash
 docker compose restart api
@@ -284,15 +435,19 @@ docker compose restart api
 
 During startup, the API retrieves:
 
-- its X.509-SVID
-- its private key
-- the SPIFFE trust bundle
+```text
+X.509-SVID
+private key
+SPIFFE trust bundle
+```
 
-These credentials are then used by the Node.js HTTPS server.
+The API entrypoint retrieves those credentials before starting Node.js.
+
+If SPIRE refuses to issue an identity, `set -e` prevents the application from starting.
 
 ---
 
-## Step 9 — Verify API Identity Issuance
+## Step 11 — Verify API Identity Issuance
 
 Inspect the latest API logs:
 
@@ -310,21 +465,33 @@ Writing bundle #0 to file /tmp/bundle.0.pem.
 SPIFFE mTLS API listening on port 3000
 ```
 
-> **Checkpoint:** Do not continue if the API failed to obtain its identity or start the mTLS listener.
+> **Checkpoint:** Do not continue if the API failed to obtain its identity or start the HTTPS listener.
 
 ---
 
 # Happy-Path Test
 
-## Step 10 — Authenticate the Client and Call the API
+## Step 12 — Authenticate and Authorize the Client
 
-Run the Client:
+Run the authorized Client:
 
 ```bash
 docker compose run --rm client
 ```
 
-The SPIRE Agent performs workload attestation, matches the Client's Docker selector against its registration entry, and issues the Client an X.509-SVID.
+The SPIRE Agent:
+
+```text
+identifies the calling process
+        ↓
+observes Docker metadata
+        ↓
+derives the Client selector
+        ↓
+matches the registration entry
+        ↓
+issues spiffe://demo.local/client
+```
 
 Expected identity:
 
@@ -332,12 +499,33 @@ Expected identity:
 SPIFFE ID: spiffe://demo.local/client
 ```
 
-The Client then uses its SPIFFE credentials to establish an mTLS connection with the API.
+The Client then presents its X.509-SVID during the mutual TLS handshake.
 
-Expected response:
+The API first validates that the certificate chains to the `demo.local` trust bundle.
+
+The API then extracts the peer's SPIFFE ID from the certificate URI SAN and compares it with:
 
 ```text
-API response: {"message":"Hello from the SPIFFE-authenticated API service!","service":"api"}
+spiffe://demo.local/client
+```
+
+Expected application output:
+
+```text
+API status: 200
+API response: {"message":"Hello from the SPIFFE-authenticated API service!","service":"api","authorizedPeer":"spiffe://demo.local/client"}
+```
+
+Inspect the API log:
+
+```bash
+docker compose logs --tail=20 api
+```
+
+Expected authorization message:
+
+```text
+Authorized peer SPIFFE ID: spiffe://demo.local/client
 ```
 
 ### Happy-Path Flow
@@ -345,7 +533,7 @@ API response: {"message":"Hello from the SPIFFE-authenticated API service!","ser
 ```text
 Client container
       ↓
-Docker workload attestation
+Workload attestation
       ↓
 docker:label:spiffe.workload:client
       ↓
@@ -355,22 +543,113 @@ spiffe://demo.local/client
       ↓
 X.509-SVID issued
       ↓
-Client application starts
+mTLS authentication succeeds
       ↓
-mTLS request
+API reads peer URI SAN
       ↓
-API response
+SPIFFE ID is authorized
+      ↓
+HTTP 200
+```
+
+---
+
+# Authorization Failure Test
+
+## Step 13 — Run the Rogue Client
+
+Run:
+
+```bash
+docker compose run --rm rogue-client
+```
+
+The Rogue Client runs the **same Node.js application** as the authorized Client.
+
+The important difference is its Docker label:
+
+```text
+spiffe.workload: rogue-client
+```
+
+The SPIRE Agent should successfully attest the workload and issue:
+
+```text
+SPIFFE ID: spiffe://demo.local/rogue-client
+```
+
+Its X.509-SVID is signed within the same `demo.local` trust domain.
+
+Therefore, certificate-chain authentication can succeed.
+
+Expected response:
+
+```text
+API status: 403
+API response: {"error":"Forbidden","message":"Peer SPIFFE ID is not authorized for this endpoint."}
+```
+
+Inspect the API logs:
+
+```bash
+docker compose logs --tail=20 api
+```
+
+Expected authorization failure:
+
+```text
+Rejected peer SPIFFE ID: spiffe://demo.local/rogue-client
+```
+
+### Why the Rogue Client Reaches HTTP 403
+
+```text
+Rogue Client
+      ↓
+Workload attestation succeeds
+      ↓
+rogue-client selector matches
+      ↓
+spiffe://demo.local/rogue-client
+      ↓
+Valid X.509-SVID issued
+      ↓
+mTLS authentication succeeds
+      ↓
+API extracts peer SPIFFE ID
+      ↓
+Identity is not authorized
+      ↓
+HTTP 403 Forbidden
+```
+
+This is **not an authentication failure**.
+
+The workload has already proven possession of a valid certificate and private key whose certificate chains to the trusted SPIFFE bundle.
+
+The failure happens at the authorization layer because:
+
+```text
+spiffe://demo.local/rogue-client
+```
+
+does not equal:
+
+```text
+spiffe://demo.local/client
 ```
 
 ---
 
 # Negative Identity Test
 
-The next test deliberately breaks the Client's workload selector to prove that a workload **cannot simply claim a SPIFFE identity**.
+The next test proves something different.
+
+Instead of giving a workload a valid but unauthorized identity, this test deliberately breaks the Client selector so SPIRE cannot issue an identity at all.
 
 ## Modify the Client Selector
 
-In `docker-compose.yml`, change:
+In `docker-compose.yml`, temporarily change:
 
 ```yaml
 spiffe.workload: "client"
@@ -386,21 +665,13 @@ Save the file before continuing.
 
 ---
 
-## Step 11 — Attempt Identity Issuance with the Invalid Selector
+## Step 14 — Attempt Identity Issuance with the Invalid Selector
 
-Run the Client again:
+Run the Client:
 
 ```bash
 docker compose run --rm client
 ```
-
-The expected result is:
-
-```text
-rpc error: code = PermissionDenied desc = no identity issued
-```
-
-### Why It Fails
 
 SPIRE now observes:
 
@@ -408,33 +679,49 @@ SPIRE now observes:
 docker:label:spiffe.workload:broken-client
 ```
 
-but the registration entry requires:
+but the Client registration entry requires:
 
 ```text
 docker:label:spiffe.workload:client
 ```
 
-Therefore:
+There is no matching registration entry.
+
+Expected failure:
+
+```text
+rpc error: code = PermissionDenied desc = no identity issued
+```
+
+### Why It Fails
 
 ```text
 Observed selector
-        ↓
+      ↓
 broken-client
-        ↓
-Does NOT match registration
-        ↓
+      ↓
+No registration entry matches
+      ↓
 No SPIFFE ID
-        ↓
+      ↓
 No X.509-SVID
-        ↓
-Application does not start
-        ↓
-No mTLS request
+      ↓
+entrypoint.sh fails
+      ↓
+Node.js does not start
+      ↓
+No mTLS connection
 ```
 
 This demonstrates **fail-closed identity issuance**.
 
-The workload cannot receive `spiffe://demo.local/client` unless its attested properties satisfy the registration policy.
+The workload cannot claim:
+
+```text
+spiffe://demo.local/client
+```
+
+because the workload's attested properties do not satisfy the policy that grants that identity.
 
 ---
 
@@ -446,11 +733,11 @@ Restore the Client label in `docker-compose.yml`:
 spiffe.workload: "client"
 ```
 
-Save the file before continuing.
+Save the file.
 
 ---
 
-## Step 12 — Verify Identity Recovery
+## Step 15 — Verify Identity Recovery
 
 Run the Client again:
 
@@ -464,27 +751,147 @@ SPIRE should once again issue:
 SPIFFE ID: spiffe://demo.local/client
 ```
 
-and the mTLS request should succeed:
+Expected result:
 
 ```text
-API response: {"message":"Hello from the SPIFFE-authenticated API service!","service":"api"}
+API status: 200
+API response: {"message":"Hello from the SPIFFE-authenticated API service!","service":"api","authorizedPeer":"spiffe://demo.local/client"}
 ```
 
-The recovery proves the relationship:
+The recovery proves:
 
 ```text
 Correct selector
       ↓
+Registration entry matches
+      ↓
+SPIFFE ID issued
+      ↓
+X.509-SVID delivered
+      ↓
+mTLS authentication succeeds
+      ↓
+SPIFFE ID authorization succeeds
+      ↓
+HTTP 200
+```
+
+---
+
+# Authentication vs. Authorization
+
+The Rogue Client and broken-selector tests deliberately demonstrate two different security failures.
+
+## Broken Selector
+
+```text
+broken-client
+      ↓
+No registration match
+      ↓
+No SPIFFE identity
+      ↓
+No X.509-SVID
+      ↓
+Authentication cannot begin
+```
+
+This fails during **identity issuance**.
+
+## Rogue Client
+
+```text
+rogue-client
+      ↓
 Registration match
       ↓
-Identity issued
+Valid SPIFFE identity
       ↓
-X.509-SVID
+Valid X.509-SVID
       ↓
-Application starts
+mTLS authentication succeeds
       ↓
-mTLS succeeds
+SPIFFE ID authorization fails
+      ↓
+HTTP 403
 ```
+
+This fails during **authorization**.
+
+The distinction is:
+
+```text
+Authentication:
+"Who is this workload?"
+
+Authorization:
+"Is this workload allowed to perform this operation?"
+```
+
+SPIRE establishes workload identity.
+
+The application then makes an authorization decision using that authenticated identity.
+
+---
+
+# API Security Checks
+
+The API applies two security gates.
+
+## Gate 1 — mTLS Authentication
+
+The HTTPS server uses:
+
+```typescript
+requestCert: true
+rejectUnauthorized: true
+```
+
+The caller must present a certificate that validates against the configured SPIFFE trust bundle.
+
+A certificate that does not chain to that trust bundle is rejected during TLS.
+
+The HTTP route is never reached.
+
+## Gate 2 — SPIFFE ID Authorization
+
+After TLS authenticates the certificate, the API reads the URI SAN from the peer X.509-SVID.
+
+Only this identity is authorized:
+
+```text
+spiffe://demo.local/client
+```
+
+A different valid identity, including:
+
+```text
+spiffe://demo.local/rogue-client
+```
+
+is rejected with:
+
+```text
+HTTP 403 Forbidden
+```
+
+---
+
+# Current Scope
+
+The API performs an exact authorization check on the Client's SPIFFE ID.
+
+The Client validates that the API certificate chains to the `demo.local` trust bundle.
+
+The Client currently disables conventional DNS hostname verification because SPIFFE identities are represented as URI SANs rather than DNS SANs.
+
+This project does **not yet** perform an exact Client-side authorization check requiring the API certificate's URI SAN to equal:
+
+```text
+spiffe://demo.local/api
+```
+
+Therefore, the project's explicit SPIFFE ID authorization demonstration is currently enforced on the **API side for callers of `/hello`**.
 
 ---
 
@@ -504,7 +911,9 @@ Return to **Terminal 2** for the final commands.
 
 ---
 
-## Step 13 — Tear Down the Environment
+## Step 16 — Tear Down the Environment
+
+Run:
 
 ```bash
 docker compose down
@@ -512,9 +921,17 @@ docker compose down
 
 This removes the remaining Compose containers and network.
 
+To also remove Docker-managed project volumes:
+
+```bash
+docker compose down -v
+```
+
 ---
 
-## Step 14 — Verify Teardown
+## Step 17 — Verify Teardown
+
+Run:
 
 ```bash
 docker compose ps
@@ -533,11 +950,14 @@ This project demonstrates the complete SPIFFE/SPIRE workload identity lifecycle:
 3. The Agent exposes the local **SPIFFE Workload API**.
 4. The Docker WorkloadAttestor derives selectors from workload metadata.
 5. **Registration entries** map those selectors to SPIFFE IDs.
-6. The Client and API obtain **X.509-SVIDs, private keys, and the trust bundle**.
-7. The Node.js applications use those credentials to establish **mutual TLS**.
-8. Breaking the Client selector prevents identity issuance, proving that identity depends on attested workload properties and registration policy.
+6. The API, Client, and Rogue Client can obtain **X.509-SVIDs, private keys, and trust bundles** when their selectors match registration policy.
+7. The Node.js applications use those credentials for **mutual TLS authentication**.
+8. The API uses the authenticated peer's **SPIFFE ID** for authorization.
+9. The authorized Client receives HTTP 200.
+10. The valid but unauthorized Rogue Client receives HTTP 403.
+11. Breaking the Client selector prevents identity issuance entirely.
 
-The core security chain demonstrated by the project is:
+The core identity chain is:
 
 ```text
 Node Attestation
@@ -554,31 +974,47 @@ SPIFFE ID
       ↓
 X.509-SVID
       ↓
-mTLS
+mTLS Authentication
+      ↓
+Authorization Policy
 ```
 
 ---
 
-## Authentication and Authorization
+## Three Outcomes Demonstrated
 
-The API applies two separate security checks.
+### Authorized Workload
 
-First, mutual TLS authenticates the connecting workload. The Client must
-present an X.509-SVID that chains to the `demo.local` SPIFFE trust bundle.
+```text
+Correct selector
+→ valid identity
+→ valid X.509-SVID
+→ authentication succeeds
+→ authorization succeeds
+→ HTTP 200
+```
 
-Second, the API extracts the peer SPIFFE ID from the certificate URI SAN
-and authorizes only:
+### Valid but Unauthorized Workload
 
-`spiffe://demo.local/client`
+```text
+Correct rogue selector
+→ valid rogue identity
+→ valid X.509-SVID
+→ authentication succeeds
+→ authorization fails
+→ HTTP 403
+```
 
-The `rogue-client` demonstrates the difference between authentication and
-authorization. SPIRE successfully attests the workload and issues:
+### Workload With No Identity Entitlement
 
-`spiffe://demo.local/rogue-client`
-
-Its X.509-SVID is valid and trusted, so mutual TLS authentication succeeds.
-However, the API rejects the request with HTTP 403 because that SPIFFE ID
-is not authorized for the protected endpoint.
+```text
+Broken selector
+→ no registration match
+→ no SPIFFE ID
+→ no X.509-SVID
+→ application does not start
+→ mTLS never begins
+```
 
 ---
 
@@ -586,10 +1022,24 @@ is not authorized for the protected endpoint.
 
 SPIFFE defines **how workloads are identified**.
 
-SPIRE provides the infrastructure that **attests workloads and delivers those identities**.
+SPIRE provides infrastructure that **attests workloads and delivers those identities**.
 
-In this project, a workload receives an identity because SPIRE can verify **what the workload is**, match that evidence against a registration policy, and issue the corresponding SPIFFE identity.
+A workload does not choose or claim its own SPIFFE ID.
+
+SPIRE identifies the workload from observed properties, matches that evidence against registration policy, and issues the corresponding identity.
+
+The application can then use that cryptographically authenticated identity to make authorization decisions.
 
 ```text
-Attestation evidence → Registration policy → SPIFFE ID → SVID → mTLS
+Attestation evidence
+        ↓
+Registration policy
+        ↓
+SPIFFE ID
+        ↓
+X.509-SVID
+        ↓
+mTLS authentication
+        ↓
+SPIFFE ID authorization
 ```
