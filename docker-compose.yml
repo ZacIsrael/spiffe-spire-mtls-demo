@@ -87,6 +87,28 @@ services:
     volumes:
       - spire-agent-socket:/run/spire/sockets
 
+  # Runs a valid SPIFFE workload that is intentionally not authorized by the API.
+  rogue-client:
+    # Reuses the same application code as the authorized Client.
+    build:
+      context: ./client
+
+    # Gives the test workload a predictable container name.
+    container_name: spiffe-rogue-client
+
+    # Ensures the API is available before this workload is started.
+    depends_on:
+      - api
+
+    # Gives SPIRE different attestation evidence from the authorized Client.
+    labels:
+      spiffe.workload: "rogue-client"
+
+    # Shares the local SPIFFE Workload API socket with this workload.
+    volumes:
+      - spire-agent-socket:/run/spire/sockets
+
+
   # Runs the API workload that will receive requests from the Client.
   api:
     # Builds the API application from its local Dockerfile.
